@@ -39,7 +39,7 @@ using DiffusionSimulator, CUDA
 
     rem(-0.01, 0.1)
     mod(-0.01, 0.1)
-    ccall("extern __nv_fmodf", llvmcall, Cfloat, (Cfloat, Cfloat), -0.01, -0.01)
+    #ccall("extern __nv_fmodf", llvmcall, Cfloat, (Cfloat, Cfloat), -0.01, -0.01)
     #display(plot(G))
     # G(t<=delta)=1;
     # G(t>=Delta&t<=Delta+delta)=-1;
