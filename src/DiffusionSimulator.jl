@@ -5,7 +5,7 @@ export Seq, Simu, diff_sim, mask_pos, diff_sim_gpu
 struct Seq
     G::Array{Float32, 2}
     t::Array{Float32, 1}
-    G_s::Array{Float32, 1}
+    G_s::Array{Float64, 1}
 end
 
 struct Simu
@@ -119,7 +119,7 @@ function diff_sim_gpu(I,seq,simu)
    
     Xc = X_cpu[kill, 1]
     Yc = X_cpu[kill, 2]
-    display(Plots.scatter(Xc[1:100], Yc[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
+    #display(Plots.scatter(Xc[1:100], Yc[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
     #println(size(X), size(X2))
     X = cu(Xc)
     Y = cu(Yc)
@@ -151,9 +151,10 @@ function diff_sim_gpu(I,seq,simu)
     Ind_ny = CUDA.zeros(Float32, N_p)
     C1 = CUDA.zeros(Bool, N_p)
     C2 = CUDA.zeros(Bool, N_p)
-    display(Plots.scatter(X[1:100], Y[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
+    #display(Plots.scatter(X[1:100], Y[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
     I = cu(I)
     println("simulation variables loaded!", typeof(I))
+    u = N_i[1]*r
     for tt in 1:length(t)
          #println("timestep = $tt")
   
@@ -163,55 +164,46 @@ function diff_sim_gpu(I,seq,simu)
         pol2cart!(pre_ang, pre_dx, Xn, Yn)
         X1 .= X; Y1 .= Y
         X1 .+= Xn; Y1 .+= Yn
-        X1 .= mod.(X1, N_i[1]*r); Y1 .= mod.(Y1, N_i[1]*r)
-        #map!(x->mod(x, N_i[1]*r), X1); map!(x->mod(x, N_i[1]*r), Y1)
-#         # Xw .= mod.(Xw,N_i[1]*r)
+
+        map!(x->CUDA.mod(x, u), X2, X1)
+        map!(x->CUDA.mod(x, u), Y2, Y1)  #Map is explicitly asychronous... ew
         
-        ind_p, A, B = mask_pos_a((X1, Y1), N_i, r, ind_p, A[1], A[2], B[1], B[2])
-        ## Time rewind!
-        # we can just rewind time in this simulation to put particles where they're supposed to be
-        #it's not more expensive - there's still a proposed and accepted step 
-        #println(size(I[ind_s]))
-        #println(size(I[ind_p]))
-        #println(size(Ie))
+        CUDA.@sync ind_p, A, B = mask_pos_a((X2, Y2), N_i, r, ind_p, A[1], A[2], B[1], B[2])
+
         A[1] .= I[ind_s]
         A[2] .= I[ind_p]
         Ie .= (A[1] .== A[2])
-        #o = sum(Ie)
-        #println(o)
+
         Xn .*= Ie;  Yn .*= Ie
         
         X .+= Xn;   Y .+= Yn
-#         # Xn[:,1] = Xn[:,1] .* Ie
-#         # Xn[:,2] = Xn[:,2] .* Ie
-        X2 .= X .* G[tt,1]
-        Y2 .= Y .* G[tt,2]
+
+        X2 .= X .* G[tt,1]; Y2 .= Y .* G[tt,2]
+
         phase .+= X2; phase.+= Y2
+        
+        CUDA.@sync map!(x->CUDA.rem(x, u), X1, X)
+        CUDA.@sync map!(x->CUDA.rem(x, u), Y1, Y)
+        CUDA.@sync map!(x->CUDA.mod(x, u), X2, X)
+        CUDA.@sync map!(x->CUDA.mod(x, u), Y2, Y)
 
-        X1 .= rem.(X,N_i[1]*r); Y1 .= rem.(Y,N_i[1]*r) #this is definitely not working
-        X2 .= mod.(X,N_i[1]*r); Y2 .= mod.(Y,N_i[1]*r) 
-        # This next bit also needs awkward doubling up
-#         # M2 = mod.(X,N_i[1]*r)
-#println(X1[1])
         A[1] .= sign.(X1); A[2] .= sign.(Y1)
-        println(A[1][1], " ", X[1], " ",  X1[1], " ")
-        A[1] .*= Ie; A[2] .*= Ie
-#         # A = sign.(M1)
 
-        C1 .= X2 .!= X; C2 .= Y2 .!= Y
-        Ind_nx .= A[1] .* C1; Ind_ny .= A[2] .* C2
-        ar = sum(G[1:tt,:]) * r * N_i[1] * -1
-        #print(typeof(ar))
-        Ind_nx .*= ar; Ind_ny .*= ar
-        Ind_nx .+= Ind_ny
-        #print(Ind_nx[1])
-        phase .+= Ind_nx; phase .+= Ind_ny
+        C1 .= X2 .!= X; C2 .= Y2 .!= Y 
+
+        Ind_nx .= A[1] .* C1 .* Ie; Ind_ny .= A[2] .* C2 .* Ie
+
+        ax = sum(G[1:tt,1]) * u; ay = sum(G[1:tt,2]) * u 
+
+        Ind_nx .*= ax; Ind_ny .*= ay #turned out it needed to be 2d
+
+        #println(A[1][1], "\t", X[1], "\t",  X1[1], "\t", X2[1], "\t", Ind_nx[1], "\t", sum(Ie))
+
+        phase .-= Ind_nx
+        phase .-= Ind_ny
+
         X .= X2; Y .= Y2
-        #B[1] .!= .!(M2.==X)
-#         # Ind_n = B .* A .* Ie
-#         ## THIS FINAL LINE
-#         #phase .+= vec(sum(-Ind_n.*N_i[1]*r .* sum(G[1:tt,:]),dims=2))
-# #         X.=M2
+        
         if mod(tt, 100) == 0
             println("timestep = $tt")
             #display(Plots.scatter(X[1:100], Y[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
@@ -219,20 +211,7 @@ function diff_sim_gpu(I,seq,simu)
             #println(o, " active particles")
             #println(Xn[1:10])
         end
-
-        
-
     end
-
-    # Need to sort out the complex exponentiation part of this
-    #S=zeros(Complex, length(seq.G_s));
-    #for gg=1:length(S)
-    #    S[gg] .= mean(exp.((1im*gam*dt*seq.G_s[gg]).*phase))
-    #end
-
-    #Xn(:,1) = Xn(:,1).*Ie; Xn(:,2) = Xn(:,2).*Ie;
-    #A, ind = mask_pos(X, N_i, r)
-    #return phase
     return phase
 end
 

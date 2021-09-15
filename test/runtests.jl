@@ -1,4 +1,4 @@
-using DiffusionSimulator, CUDA
+using DiffusionSimulator, CUDA, StatsBase, Plots
 
     ra=10e-6; # [m]
     N_ii=60; # number of side pixels
@@ -14,7 +14,7 @@ using DiffusionSimulator, CUDA
     #d=sqrt(X.^2+Y.^2)
     #I=d<=ra
     I[dgrid .>= ra] .= 1
-    
+    phi = sum(I)/length(I)
     gam=2.675e8
     # Setup sequence
     delta=5e-3
@@ -29,16 +29,25 @@ using DiffusionSimulator, CUDA
     #println("running...")
     
     G = kron(G, dir')
+    sum(G[1:200,:])
     #display(plot(G))
     #println("run")
+    N = round(1e6/phi)
     seq = Seq(G, t, collect(0:0.01:.5))
-    simu = Simu([2.3e-9], 1e6, abs(len[2]-len[1]))
+    simu = Simu([2.3e-9], N, abs(len[2]-len[1]))
+# eps(Float64)
+#     rem.(cu([-0.01,-0.01]), cu([0.1, 0.1]))
+#   mod.(cu([-0.01,-0.01]), cu([0.1, 0.1]))
+# w = cu([-0.01,-0.01])
+ #q = cu([0.1, 0.1])
+ #CUDA.rem.(w, q)
+ #CUDA.mod.(w, q)
+#     rem(-0.01, 0.1)
+#     mod(-0.01, 0.1)
+# CUDA.rem.(-0.01, 0.1)
 
-    @code_llvm CUDA.rem.(cu([-0.01,-0.01]), cu([0.1, 0.1]))
-    CUDA.mod.(cu([-0.01,-0.01]), cu([0.1, 0.1]))
-
-    rem(-0.01, 0.1)
-    mod(-0.01, 0.1)
+# CUDA.mod(-0.01, 0.1)
+# map(x->CUDA.mod(x, 0.1), w)
     #ccall("extern __nv_fmodf", llvmcall, Cfloat, (Cfloat, Cfloat), -0.01, -0.01)
     #display(plot(G))
     # G(t<=delta)=1;
@@ -58,19 +67,22 @@ using DiffusionSimulator, CUDA
     # # Run simulation
     #@time phase = diff_sim(I,seq,simu)
 
-phase = diff_sim_gpu(I, seq, simu)
-phasec = zeros(Float32, length(phase))
+CUDA.@time diff_sim_gpu(I, seq, simu)
+phasec = zeros(Float64, length(phase))
 copyto!(phasec, phase)
 comp = phasec .* (0-1im)
-mean(comp)
+mean(phasec)
 
-S=zeros(ComplexF32, length(seq.G_s))
-exp.(comp*gam*dt*seq.G_s[10])
+S=zeros(ComplexF64, length(seq.G_s))
+#exp.(comp*gam*dt*seq.G_s[10])
 for gg in 1:length(S)
     S[gg]=mean(exp.(comp*gam*dt*seq.G_s[gg]))
 end
-S
-plot(seq.G_s, real.(S), yaxis=:log)
+##S = map(x->x <= 0.0 ? typemin(S) : x, real(S))
+plot(seq.G_s, abs.(real.(S)), yaxis=:log)
+#plot(seq.G_s, abs.(real.(S)))
+#plot(seq.G_s, abs.(imag.(S)))
+
 #comp.i = phasec
 #Comple
     #scatter(X[1:100], Y[1:100])
