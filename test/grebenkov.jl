@@ -1,8 +1,9 @@
-using DiffusionSimulator, CUDA, StatsBase, Plots
+using DiffusionSimulator, CUDA, StatsBase, Plots, JLD2
 
-    ra=10e-6; # [m]
+    ra=5e-6; # [m]
     N_ii=60; # number of side pixels
-    len = collect(range(-ra*1.3, ra*1.3, length=N_ii))
+    #len = collect(range(-ra*1.3, ra*1.3, length=N_ii))
+    len = collect(range(-7.95e-6, 7.95e-6, length=N_ii))
     dgrid = zeros(N_ii, N_ii)
     for i in 1:N_ii
         for j in 1:N_ii
@@ -28,8 +29,8 @@ using DiffusionSimulator, CUDA, StatsBase, Plots
 
     N = round(1e6/phi)
     seq = Seq(G, t, collect(0:0.01:.5)) # build seq object
-    simu = Simu([2.3e-9], N, abs(len[2]-len[1])) # build sim object
-
+    simu = Simu([1e-9], N, abs(len[2]-len[1])) # build sim object
+println("dx = ", abs(len[2]-len[1]))
 #CUDA.@time diff_sim_gpu(I, seq, simu)
 phase = diff_sim_gpu(I, seq, simu)
 phasec = zeros(Float64, length(phase))
@@ -43,7 +44,10 @@ for gg in 1:length(S)
     S[gg]=mean(exp.(comp*gam*dt*seq.G_s[gg]))
 end
 
-plot(seq.G_s, abs.(real.(S)), yaxis=:log)
+display(plot(seq.G_s, abs.(real.(S)), yaxis=:log))
+res =Dict()
+res["analytical"] = S
+#JLD2.save("results_greb.jld2", res)
 #plot(seq.G_s, abs.(real.(S)))
 #plot(seq.G_s, abs.(imag.(S)))
 

@@ -101,15 +101,9 @@ function diff_sim_gpu(I,seq,simu)
     N_i = size(I)
     dim=length(N_i)
     dx=Float32.(sqrt.(2*dim*dt.*D))
-    #println("size of dx = ", size(dx))
-    #N_c=sum(unique(I[I .> 0]))
-    
-    #N=round(Int32, N*length(I)/sum(I .> 0))
-    #println(N)
     y = (r .* N_i)
     X_cpu=rand(Float32, N, dim) .* [y[1] y[2]]
     ind, A = mask_pos!(X_cpu, N_i, r)
-    #println(ind[1:100])
     kill = I[ind] .!= 0
     #println("values at: ", I[ind[1:10]], " will be deleted according to mask: ", kill[1:10])
     #deleteat!(view(X,:, 1), kill); deleteat!(view(X,:, 2), kill)
@@ -121,8 +115,9 @@ function diff_sim_gpu(I,seq,simu)
     Yc = X_cpu[kill, 2]
     #display(Plots.scatter(Xc[1:100], Yc[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
     #println(size(X), size(X2))
-    X = cu(Xc)
-    Y = cu(Yc)
+    X = CUDA.zeros(Float32, length(Xc))
+    Y = CUDA.zeros(Float32, length(Yc))
+    copyto!(X, Xc); copyto!(Y, Yc)
     #X1[:,1] .= X[kill, 1]
     #X1[:,2] .= X[kill, 2]
     # deleteat!(ind, kill)
@@ -140,6 +135,7 @@ function diff_sim_gpu(I,seq,simu)
     # Xw = similar(X)
     Ie = CUDA.zeros(Bool, N_p)
     phase = similar(pre_ang)
+    phase .= 0
     phasesum = similar(X)
     X1 = similar(X) # working memory for coordinate manipulation
     X2 = similar(X) # this is tragically untidy, but fast
@@ -165,9 +161,9 @@ function diff_sim_gpu(I,seq,simu)
         X1 .= X; Y1 .= Y
         X1 .+= Xn; Y1 .+= Yn
 
-        map!(x->CUDA.mod(x, u), X2, X1)
-        map!(x->CUDA.mod(x, u), Y2, Y1)  #Map is explicitly asychronous... ew
-        
+        #map!(x->CUDA.mod(x, u), X2, X1)
+        #map!(x->CUDA.mod(x, u), Y2, Y1)  #Map is explicitly asychronous... ew
+        cmod(X2, X1, u); cmod(Y2, Y1, u)
         CUDA.@sync ind_p, A, B = mask_pos_a((X2, Y2), N_i, r, ind_p, A[1], A[2], B[1], B[2])
 
         A[1] .= I[ind_s]
@@ -182,10 +178,12 @@ function diff_sim_gpu(I,seq,simu)
 
         phase .+= X2; phase.+= Y2
         
-        CUDA.@sync map!(x->CUDA.rem(x, u), X1, X)
-        CUDA.@sync map!(x->CUDA.rem(x, u), Y1, Y)
-        CUDA.@sync map!(x->CUDA.mod(x, u), X2, X)
-        CUDA.@sync map!(x->CUDA.mod(x, u), Y2, Y)
+        crem(X1, X, u); crem(Y1, Y, u)
+        cmod(X2, X1, u); cmod(Y2, Y1, u)
+        #CUDA.@sync map!(x->CUDA.rem(x, u), X1, X)
+        #CUDA.@sync map!(x->CUDA.rem(x, u), Y1, Y)
+        #CUDA.@sync map!(x->CUDA.mod(x, u), X2, X)
+        #CUDA.@sync map!(x->CUDA.mod(x, u), Y2, Y)
         # map!(x->CUDA.rem(x, u), X1, X)
         # map!(x->CUDA.rem(x, u), Y1, Y)
         # map!(x->CUDA.mod(x, u), X2, X)

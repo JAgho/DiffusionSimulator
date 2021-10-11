@@ -199,8 +199,10 @@ function mask_pos_a(pos::Tuple{CuArray{Float32,1},CuArray{Float32,1}},  N_ii, r)
     n1 = cu(Int32(N_ii[1]))
     n2 = cu(Int32(N_ii[2]))
     lb = Int32(1)
-    CUDA.map(x -> x < lb ? lb : x, A2); map(x -> x < lb ? lb : x, A2)
-    map(x -> x > n1 ? n1 : x, A1); map(x -> x > n2 ? n2 : x, A2)
+    #CUDA.map(x -> x < lb ? lb : x, A2); map(x -> x < lb ? lb : x, A2)
+    #map(x -> x > n1 ? n1 : x, A1); map(x -> x > n2 ? n2 : x, A2)
+    lbound(A1, lb); lbound(A2, lb)
+    ubound(A1, n1); ubound(A2, n2)
     A2 .-= 1
     A2 .*= n1
     ind .= A1 .+ A2
@@ -218,8 +220,10 @@ function mask_pos_a(pos::Tuple{CuArray{Float32,1},CuArray{Float32,1}},  N_ii, r,
     n2 = Int32(N_ii[2])
     lb = Int32(1)
 
-    CUDA.map!(x -> x < lb ? lb : x, A1, A1); CUDA.map!(x -> x < lb ? lb : x, A2, A2)
-    CUDA.map!(x -> x > n1 ? n1 : x, A1, A1); CUDA.map!(x -> x > n2 ? n2 : x, A2, A2)
+    #CUDA.map!(x -> x < lb ? lb : x, A1, A1); CUDA.map!(x -> x < lb ? lb : x, A2, A2)
+    #CUDA.map!(x -> x > n1 ? n1 : x, A1, A1); CUDA.map!(x -> x > n2 ? n2 : x, A2, A2)
+    lbound(A1, lb); lbound(A2, lb)
+    ubound(A1, n1); ubound(A2, n2)
     #BOUNDED
     A2 .-= 1
     A2 .*= n1
@@ -249,4 +253,20 @@ function pol2cart!(th,r, X::CuArray{Float32,1}, Y::CuArray{Float32,1})
     #println("size of X is ", size(X), "size of r is ", size(r), "size of th is ", size(th))
     #X[1:e] .= w
     #X[e+1:end] = r.*sin.(th)
+end
+
+function cmod(dst, src, u)
+    map!(x->CUDA.mod(x, u), dst, src)
+end
+
+function crem(dst, src, u)
+    map!(x->rem(x, u), dst, src)
+end
+
+function lbound(arr, lb)
+    CUDA.map!(x -> x < lb ? lb : x, arr, arr)
+end
+
+function ubound(arr, ub)
+    CUDA.map!(x -> x > ub ? ub : x, arr, arr)
 end

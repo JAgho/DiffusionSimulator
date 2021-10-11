@@ -12,7 +12,8 @@ while i <= length(fnames)
     fname = fnames[i]
     println("processing $fname")
     file = matopen(fname)
-    I = .!read(file, "Im")
+    I = Int32.(.!read(file, "Im"))
+    #display(heatmap(I, ratio=:equal))
     #ra=10e-6; # [m]
     #N_ii=60; # number of side pixels
     #len = collect(range(-ra*1.3, ra*1.3, length=N_ii))
@@ -31,9 +32,9 @@ while i <= length(fnames)
     G = kron(G, dir')
     dt=t[2]-t[1]
 
-    N = round(2e6/phi)
+    N = round(10e6/phi)
     seq = Seq(G, t, collect(0:0.01:.5)) # build seq object
-    simu = Simu([2.3e-9], N, dx) # build sim object
+    simu = Simu([1e-9], N, dx) # build sim object
 
     phase = diff_sim_gpu(I, seq, simu)
     phasec = zeros(Float64, length(phase))
@@ -55,7 +56,7 @@ end
 res = main()
 #plot(seq.G_s, abs.(real.(S)), yaxis=:log, ylim=[1e-3, 1])
 
-JLD2.save("result2.jld2", res)
+JLD2.save("results_disordered.jld2", res)
 #uh = JLD2.load("results.jld2")
 #uh
 
