@@ -6,18 +6,20 @@ fnames = open_dialog("test", select_multiple=true)
 res = Dict()
 i = 1
 fname = fnames[1]
+sfname = diff_save_interface("output/greb")
 while i <= length(fnames)
-    try
+    # try
     @sync begin
     fname = fnames[i]
     println("processing $fname")
     file = matopen(fname)
     I = Int32.(.!read(file, "Im"))
+    display(heatmap(I))
     #display(heatmap(I, ratio=:equal))
     #ra=10e-6; # [m]
     #N_ii=60; # number of side pixels
     #len = collect(range(-ra*1.3, ra*1.3, length=N_ii))
-    dx = 1e-6#abs(len[2]-len[1])
+    dx = 2e-6#abs(len[2]-len[1])
 
     phi = sum(I)/length(I)
     gam=2.675e8
@@ -32,31 +34,41 @@ while i <= length(fnames)
     G = kron(G, dir')
     dt=t[2]-t[1]
 
-    N = round(10e6/phi)
+    N = round(5e6/phi)
     seq = Seq(G, t, collect(0:0.01:.5)) # build seq object
-    simu = Simu([1e-9], N, dx) # build sim object
+    simu = Simu([1e-9], N, dx, gam) # build sim object
 
-    phase = diff_sim_gpu(I, seq, simu)
-    phasec = zeros(Float64, length(phase))
-    copyto!(phasec, phase)
-    comp = phasec .* (0-1im)
+    S = Array(diff_sim_gpu(I, seq, simu))
+    # phasec = zeros(Float64, length(phase))
+    # copyto!(phasec, phase)
+    # comp = phasec .* (0-1im)
 
 
-    S=zeros(ComplexF64, length(seq.G_s))
-    for gg in 1:length(S); S[gg]=mean(exp.(comp*gam*dt*seq.G_s[gg])); end
+    # S=zeros(ComplexF64, length(seq.G_s))
+    # for gg in 1:length(S); S[gg]=mean(exp.(comp*gam*dt*seq.G_s[gg])); end
     res[fname] = S
     end
     i += 1
-catch 
-    res[fname] = "err"
+# catch 
+#     res[fname] = "err"
+#     println("something has gone wrong...")
+# end
 end
-end
+safe_save(sfname, res)
 return res
 end
 res = main()
+G_s = collect(0:0.01:.5)
+#end
+bval=(2.675e8.*G_s).^2*delta^2*(Delta-delta/3);
+bval .*= 1e-9
+plot(bval, collect(values(res))[1], yaxis=:log)
 #plot(seq.G_s, abs.(real.(S)), yaxis=:log, ylim=[1e-3, 1])
 
-JLD2.save("results_disordered.jld2", res)
+#JLD2.save("output/generic/results_ordered_c2.jld2", res)
+
+
 #uh = JLD2.load("results.jld2")
 #uh
+
 

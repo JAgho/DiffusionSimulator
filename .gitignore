@@ -1,2 +1,4 @@
 /Manifest.toml
 *.jld2
+*.svg
+/output/*

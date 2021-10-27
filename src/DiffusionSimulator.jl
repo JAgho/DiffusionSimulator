@@ -1,6 +1,8 @@
 module DiffusionSimulator
 using StatsBase, CUDA, Adapt, Plots
-export Seq, Simu, diff_sim, mask_pos, diff_sim_gpu
+import Gtk: save_dialog, Null, GtkFileFilter
+import JLD2: save
+export Seq, Simu, diff_sim, mask_pos, diff_sim_gpu, diff_save_interface, safe_save
 # Write your package code here.
 struct Seq
     G::Array{Float32, 2}
@@ -12,9 +14,11 @@ struct Simu
     D::Array{Float32, 1}
     N::Int32
     r::Float32
+    γ::Float64
 end
 
 include("util.jl")
+include("interface.jl")
 
 function diff_sim(I,seq,simu)
     t=seq.t;
@@ -90,160 +94,99 @@ end
 
 function diff_sim_gpu(I,seq,simu)
     println("loading simulation...")
+    ## Unpack variables and copy to device
     t=seq.t;
     G = CUDA.zeros(Float32, size(seq.G))
     G = seq.G
     D=simu.D
     N=simu.N;
     r=cu(Float32(simu.r))
-    
     dt=t[2]-t[1]
     N_i = size(I)
     dim=length(N_i)
     dx=Float32.(sqrt.(2*dim*dt.*D))
     y = (r .* N_i)
+    u = N_i[1]*r
+    ## Compute intial positions on the host
     X_cpu=rand(Float32, N, dim) .* [y[1] y[2]]
     ind, A = mask_pos!(X_cpu, N_i, r)
-    kill = I[ind] .!= 0
-    #println("values at: ", I[ind[1:10]], " will be deleted according to mask: ", kill[1:10])
-    #deleteat!(view(X,:, 1), kill); deleteat!(view(X,:, 2), kill)
-    N_p = sum(kill)
-    #dump(X[kill, 1])
-    #println(size(view(X, :, 1)[kill]))
-   
+    kill = I[ind] .!= 0 # indices of points in diffusing regions only
     Xc = X_cpu[kill, 1]
     Yc = X_cpu[kill, 2]
-    #display(Plots.scatter(Xc[1:100], Yc[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
-    #println(size(X), size(X2))
+    N_p = length(Xc)
+    println(N_p, " active particles")
+    ## Allocate device memory
     X = CUDA.zeros(Float32, length(Xc))
     Y = CUDA.zeros(Float32, length(Yc))
-    copyto!(X, Xc); copyto!(Y, Yc)
-    #X1[:,1] .= X[kill, 1]
-    #X1[:,2] .= X[kill, 2]
-    # deleteat!(ind, kill)
-    # println(length(X))
-    # println(length(ind))
-    #N_i = CuArray(Float32.([size(I)[1], size(I)[2]]))
+    copyto!(X, Xc); copyto!(Y, Yc) # copy host coords to device
     ind_s, A, B = mask_pos_a((X, Y), N_i, r)
-    #ind_test, D = mask_pos!(hcat(Xc, Yc), N_i, r)
-    println(N_p, " active particles")
-    
     pre_dx = CUDA.fill(dx[1], N_p)
     pre_ang = CUDA.zeros(Float32, N_p)
-    ind_p = similar(ind_s)
-
-    # Xw = similar(X)
     Ie = CUDA.zeros(Bool, N_p)
-    phase = similar(pre_ang)
-    phase .= 0
-    phasesum = similar(X)
-    X1 = similar(X) # working memory for coordinate manipulation
-    X2 = similar(X) # this is tragically untidy, but fast
+    phase = CUDA.zeros(Float32, N_p)
+    ind_p = similar(ind_s)
+    X1 = similar(X) 
+    X2 = similar(X) 
     Y1 = similar(X)
     Y2 = similar(X)
-    Xn = similar(X) # memory for steps must be stable over simulation steps
-    Yn = similar(X) # gpu programming really hates memory moves
+    Xn = similar(X) 
+    Yn = similar(X) 
     Ind_nx = CUDA.zeros(Float32, N_p)
     Ind_ny = CUDA.zeros(Float32, N_p)
     C1 = CUDA.zeros(Bool, N_p)
     C2 = CUDA.zeros(Bool, N_p)
-    #display(Plots.scatter(X[1:100], Y[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
     I = cu(I)
     println("simulation variables loaded!", typeof(I))
-    u = N_i[1]*r
+    ## Begin main loop
     for tt in 1:length(t)
-         #println("timestep = $tt")
-  
-        #pre_ang .= rand(N_p).*(2*pi)
+        ## Generate random moves
         CUDA.rand!(pre_ang)
         pre_ang .*= (2*pi)
         pol2cart!(pre_ang, pre_dx, Xn, Yn)
+        ## Apply trial steps to coords
         X1 .= X; Y1 .= Y
         X1 .+= Xn; Y1 .+= Yn
-
-        #map!(x->CUDA.mod(x, u), X2, X1)
-        #map!(x->CUDA.mod(x, u), Y2, Y1)  #Map is explicitly asychronous... ew
+        ## Compute the cell that trial steps end within
         cmod(X2, X1, u); cmod(Y2, Y1, u)
-        CUDA.@sync ind_p, A, B = mask_pos_a((X2, Y2), N_i, r, ind_p, A[1], A[2], B[1], B[2])
-
-        A[1] .= I[ind_s]
+        ind_p, A, B = mask_pos_a((X2, Y2), N_i, r, ind_p, A[1], A[2], B[1], B[2])
+        A[1] .= I[ind_s] # this is also where we should populate pre_dx?
         A[2] .= I[ind_p]
+        ## Recognise illegal steps and delete these moves
+        ## TODO write kernel to allow true comparison of cell moves
+        ## This should allow probablistic acceptance on basis of permeability
         Ie .= (A[1] .== A[2])
-
         Xn .*= Ie;  Yn .*= Ie
-        
+        ## Finalise moves    
         X .+= Xn;   Y .+= Yn
-
+        ## Compute phase change based on position
         X2 .= X .* G[tt,1]; Y2 .= Y .* G[tt,2]
-
         phase .+= X2; phase.+= Y2
-        
+        ## Apply periodic boundary conditions     
         crem(X1, X, u); crem(Y1, Y, u)
         cmod(X2, X1, u); cmod(Y2, Y1, u)
-        #CUDA.@sync map!(x->CUDA.rem(x, u), X1, X)
-        #CUDA.@sync map!(x->CUDA.rem(x, u), Y1, Y)
-        #CUDA.@sync map!(x->CUDA.mod(x, u), X2, X)
-        #CUDA.@sync map!(x->CUDA.mod(x, u), Y2, Y)
-        # map!(x->CUDA.rem(x, u), X1, X)
-        # map!(x->CUDA.rem(x, u), Y1, Y)
-        # map!(x->CUDA.mod(x, u), X2, X)
-        # map!(x->CUDA.mod(x, u), Y2, Y)
-
         A[1] .= sign.(X1); A[2] .= sign.(Y1)
-
         C1 .= X2 .!= X; C2 .= Y2 .!= Y 
-
-        Ind_nx .= A[1] .* C1 .* Ie; Ind_ny .= A[2] .* C2 .* Ie
-
+        ## Modify phase change to account for PBC
         ax = sum(G[1:tt,1]) * u; ay = sum(G[1:tt,2]) * u 
-
-        Ind_nx .*= ax; Ind_ny .*= ay #turned out it needed to be 2d
-
-        #println(A[1][1], "\t", X[1], "\t",  X1[1], "\t", X2[1], "\t", Ind_nx[1], "\t", sum(Ie))
-
+        Ind_nx .= A[1] .* C1 .* Ie; Ind_ny .= A[2] .* C2 .* Ie
+        Ind_nx .*= ax; Ind_ny .*= ay 
         phase .-= Ind_nx
         phase .-= Ind_ny
-
-        X .= X2; Y .= Y2
-        
+        ## Save this time-step's move
+        X .= X2; Y .= Y2      
         if mod(tt, 100) == 0
             println("timestep = $tt")
             #display(Plots.scatter(X[1:100], Y[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
-            #o = sum(Ie)
-            #println(o, " active particles")
-            #println(Xn[1:10])
         end
     end
-    return phase
-end
-
-end
-
-"""
-
-function mask_pos(X,N_i,r)
-    X=ceil.(X .* 1 ./ r);
-    Threads.@threads @simd for e in X
-        if e < 1
-            e = 1
-        end
-    end
-    @code_lowered tmap(X)
-
-    X[X.<1].=1;
-    X[X[:,1]>N_i[1],1]=N_i(1);
-    X[X[:,2]>N_i[2],2]=N_i(2);
+    S = zeros(Float64, length(seq.G_s))
     
-    if length(N_i)==2
-        %ind_s=sub2ind(N_i,X(:,1),X(:,2));
-        ind_s = X(:,1) + (X(:,2)-1)*N_i(1);
-    elseif length(N_i)==3
-        X(X(:,3)>N_i(3),3)=N_i(3);
-        ind_s=sub2ind(N_i,X(:,1),X(:,2),X(:,3));
+    for i in 1:length(S)
+        S[i] = mean(cos.(Float64.(phase) .* simu.γ .* dt .* seq.G_s[i])   )
+
+        #S[gg]=mean(exp.(comp*gam*dt*seq.G_s[gg]))
     end
-    
+    return S
 end
-"""
 
-
-
+end
