@@ -1,10 +1,11 @@
 function diff_save_interface(root, fname = "")
     if fname !== ""
-        return fname
+        return joinpath(root,fname)
     end
     l = length(splitpath(root))
     dir = pwd()
     cd(root)
+
     fname = save_dialog("Save Result", Null(), (GtkFileFilter("*.jld2", name="All supported formats"), "*.jld2"))
     cd(dir)
     if splitext(fname)[end] == ".jld2"

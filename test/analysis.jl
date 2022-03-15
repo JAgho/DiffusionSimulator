@@ -28,11 +28,11 @@ function decompose_diff_dataset(fname)
     return sort!(collect(keys(msort))), msort
 end
 
-ord1, msort1 = decompose_diff_dataset("output/generic/results_disordered.jld2")
-ord2, msort2 = decompose_diff_dataset("output/generic/results_disordered_s2.jld2")
-ord3, msort3 = decompose_diff_dataset("output/generic/results_disordered_c2.jld2")
+ord1, msort1 = decompose_diff_dataset("output/generic/15px/15px_ord_greb.jld2")
+ord2, msort2 = decompose_diff_dataset("output/generic/15px/15px_ord.jld2")
+#ord3, msort3 = decompose_diff_dataset("output/generic/results_disordered_c2.jld2")
 ord = intersect(ord1, ord2)
-ideal = JLD2.load("results_ideal.jld2")
+ideal = JLD2.load("output/generic/results_ideal.jld2")
 ana = ideal["analytical"]
 errors = []
 v1 = []
@@ -46,7 +46,7 @@ for k in ord
     gs = "Gradient field (T/m)"
     S1 = abs.(real.(msort1[k]))
     S2 = abs.(real.(msort2[k]))
-    S3 = abs.(real.(msort3[k]))
+    #S3 = abs.(real.(msort3[k]))
     #println(size(msort[k]), " \t$k")
     a = plot(G_s, 
             abs.(real.(S1))[:,1],
@@ -57,24 +57,24 @@ for k in ord
             linecolor = :blue,
             yaxis=:log)
     plot!(a, G_s, abs.(real.(S2))[:,1], linecolor=:red, label="S2")
-    plot!(a, G_s, abs.(real.(S3))[:,1], linecolor=:orange, label="C2")
+    #plot!(a, G_s, abs.(real.(S3))[:,1], linecolor=:orange, label="C2")
     for i = 1:size(S1)[2] - 1
         plot!(a,G_s, abs.(real.(S1))[:,i], label="" , lc=:blue)
         plot!(a,G_s, abs.(real.(S2))[:,i],  label="", lc=:red)
-        plot!(a,G_s, abs.(real.(S3))[:,i],  label="", lc=:orange)
+        #plot!(a,G_s, abs.(real.(S3))[:,i],  label="", lc=:orange)
     end
     
-    plot!(G_s, abs.(real.(ana)), label="Grebenkov ideal result", lc=:green)
+    #plot!(G_s, abs.(real.(ana)), label="Grebenkov ideal result", lc=:green)
     #err = abs.(mean(S .- ana, dims = 2))
     #push!(errors, sum(err))
     #dump(err)
     #b = plot(G_s, ana, xaxis=gs, title="Absolute error vs gradient for l = $k", legend=false)
     m1 = mean(S1, dims=2)
     m2 = mean(S2, dims=2)
-    m3 = mean(S3, dims=2)
+    #m3 = mean(S3, dims=2)
     covar1 = std(S1, dims=2)./m1
     covar2 = std(S2, dims=2)./m2
-    covar3 = std(S3, dims=2)./m3
+    #covar3 = std(S3, dims=2)./m3
 
     b = plot(G_s, 
                 covar1, 
@@ -86,11 +86,11 @@ for k in ord
                 )
 
     plot!(b, G_s, covar2, label="S2", linecolor=:red)            
-    plot!(b, G_s, covar3, label="C2", linecolor=:orange)
+    #plot!(b, G_s, covar3, label="C2", linecolor=:orange)
 
     push!(v1, sum(covar1))
-    push!(v2, sum(covar2))
-    push!(v3, sum(covar3))
+    #push!(v2, sum(covar2))
+    #push!(v3, sum(covar3))
     c = plot(G_s, abs.(m2.-m1), title="Difference of means", legend=false)
     push!(diffs, abs.(m2.-m1))
     #display(a)
@@ -109,7 +109,7 @@ e = scatter(ord, v1, xaxis = "Linear dimension",
             mc=:blue,
             legend=true)
 scatter!(e, ord, v2, label = "S2", mc=:red)
-scatter!(e, ord, v3, label = "C2", mc=:orange)
+#scatter!(e, ord, v3, label = "C2", mc=:orange)
 #display(d)
 savefig(e, "output/covar_dis.png")
 display(e)

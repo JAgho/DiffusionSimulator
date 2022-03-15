@@ -1,8 +1,8 @@
 module DiffusionSimulator
-using StatsBase, CUDA, Adapt, Plots
-import Gtk: save_dialog, Null, GtkFileFilter
+using StatsBase, CUDA, Adapt#, Plots
+#import Gtk: save_dialog, Null, GtkFileFilter
 import JLD2: save
-export Seq, Simu, diff_sim, mask_pos, diff_sim_gpu, diff_save_interface, safe_save
+export Seq, Simu, diff_sim, mask_pos, diff_sim_gpu#, diff_save_interface, safe_save
 # Write your package code here.
 struct Seq
     G::Array{Float32, 2}
@@ -18,7 +18,7 @@ struct Simu
 end
 
 include("util.jl")
-include("interface.jl")
+#include("interface.jl")
 
 function diff_sim(I,seq,simu)
     t=seq.t;
@@ -136,7 +136,7 @@ function diff_sim_gpu(I,seq,simu)
     C1 = CUDA.zeros(Bool, N_p)
     C2 = CUDA.zeros(Bool, N_p)
     I = cu(I)
-    println("simulation variables loaded!", typeof(I))
+    println("simulation variables loaded!")
     ## Begin main loop
     for tt in 1:length(t)
         ## Generate random moves
@@ -168,25 +168,24 @@ function diff_sim_gpu(I,seq,simu)
         C1 .= X2 .!= X; C2 .= Y2 .!= Y 
         ## Modify phase change to account for PBC
         ax = sum(G[1:tt,1]) * u; ay = sum(G[1:tt,2]) * u 
-        Ind_nx .= A[1] .* C1 .* Ie; Ind_ny .= A[2] .* C2 .* Ie
+        #Ind_nx .= A[1] .* C1 .* Ie; Ind_ny .= A[2] .* C2 .* Ie
+        Ind_nx .= A[1] .* C1; Ind_ny .= A[2] .* C2
         Ind_nx .*= ax; Ind_ny .*= ay 
-        phase .-= Ind_nx
-        phase .-= Ind_ny
+        phase .-= Ind_nx 
+        phase .-= Ind_ny 
         ## Save this time-step's move
         X .= X2; Y .= Y2      
-        if mod(tt, 100) == 0
-            println("timestep = $tt")
-            #display(Plots.scatter(X[1:100], Y[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
-        end
+        # if mod(tt, 100) == 0
+        #     println("timestep = $tt")
+        #     #display(Plots.scatter(X[1:100], Y[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
+        # end
     end
     S = zeros(Float64, length(seq.G_s))
     
     for i in 1:length(S)
-        S[i] = mean(cos.(Float64.(phase) .* simu.γ .* dt .* seq.G_s[i])   )
-
-        #S[gg]=mean(exp.(comp*gam*dt*seq.G_s[gg]))
+        S[i] = mean(cos.(Float64.(phase) .* simu.γ .* dt .* seq.G_s[i]))
     end
-    return S
+    return Array(S)
 end
 
 end
