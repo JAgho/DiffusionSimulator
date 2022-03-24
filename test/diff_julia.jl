@@ -6,16 +6,16 @@ include("../src/sequences.jl")
 CUDA.device!(2)
 function main()
 
-    rng =1:1
+    rng =1:10
     res = []
     Is = []
-    ldir = "../YTRecon/output/trial_2/ordel/"
+    ldir = "../YTRecon/output/recon_error/disord_1e0/"
     
-    sdir = "output/16px/"
-    fn = "ordel.jld2"
+    sdir = "output/recon_error_dde/"
+    fn = "disord_1e0_sq.jld2"
     for i in rng
         #load image
-        ln = "recon_$i.png"
+        ln = "recon_sq_$i.png"
         lname = ldir*ln
         push!(Is, Gray.(load(lname)) .< 0.5)
 
@@ -30,13 +30,13 @@ function main()
          # build seq object
 
         simu = Simu([1e-9], N, dx, gam) # build sim object
-        seq = pgse(10e-3, 10.1e-3, 0:0.001:0.793, [0,1], 1000)
-        # δ = 5e-3
-        # Δ = 10e-3
-        # tₘ = 5.01e-3
-        # dir = [0,1]
-        # Gₛ = collect(0:0.001:0.793)
-        # seq = dde(δ, Δ, tₘ, 1000, Gₛ, dir)
+        # seq = pgse(10e-3, 10.1e-3, 0:0.001:0.793, [0,1], 1000)
+        δ = 5e-3
+        Δ = 10e-3
+        tₘ = 5.1e-3
+        dir = [0,1]
+        Gₛ = collect(0:0.001:0.793)
+        seq = dde(δ, Δ, tₘ, 1000, Gₛ, dir)
         #run simulation
         S = Array(diff_sim_gpu(Is[i], seq, simu))
 

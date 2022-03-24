@@ -90,21 +90,25 @@ function analyse_pair(fname)
     display(covar_pair(gs, re, bn))
 end
 
-fs = ["disord.jld2", "ord.jld2", "shuf_1.jld2","shuf_2.jld2", "shuf_3.jld2", "shuf_4.jld2", "shuf_5.jld2", "disordel.jld2", "ordel.jld2"]
+fs = ["disord.jld2", "ord.jld2", "disordel.jld2", "ordel.jld2"]
 fr = ["shuf_1.jld2","shuf_2.jld2", "shuf_3.jld2", "shuf_4.jld2", "shuf_5.jld2"]
 ft = ["disordel.jld2", "ordel.jld2"]
-for i in fs
-    analyse_pair("output/16px/"*i)
-end
-
-begin
-plt = plot(yaxis=:log, ylim=(1e-3, 1),xaxis="b-value (s/um²)", title = " S(q)+cS(q) signal", size = (1500,1000))
-bases = agglomerate_results()
+# for i in fs
+#     analyse_pair("output/16px/"*i)
+# end
 
 
-for i in fs[8:9]
-    fname = "output/16px/"*i
-    k = "16px_"*i[1:end-5]*"_basis.jld2"
+#plt = plot(yaxis=:log, ylim=(1e-3, 1),xaxis="b-value (s/um²)", title = " S(q)+cS(q) signal", size = (1500,1000))
+#bases = agglomerate_results()
+
+bases = JLD2.load("output/bases/basis_500_dde_final.jld2")
+
+
+for i in append!(fs, fr)
+    
+    fname = "output/16px_dde_2/"*i
+    k = i[1:end-5]
+    plt = plot(yaxis=:log, ylim=(1e-3, 1),xaxis="Max Field (T/m)", title = " S(q)+cS(q) signal "*k, size = (1500,1000))
     delta = 10e-3
     Delta = 10.1e-3
     gs = collect(0:0.001:0.793)
@@ -112,11 +116,12 @@ for i in fs[8:9]
     bval .*= 1e-9
     re = load_pair(fname)
     ip = i[1:end-5]
-    plot!(plt, gs, mean(re[1], dims=2),  label=ip*" mean sq+csq")
-    plot!(plt, gs, mean(re[2], dims=2),  label=ip*" mean sq")
+    plot!(plt, gs, mean(re[1], dims=2), ribbon = std(re[1], dims=2), label=ip*" mean sq+csq")
+    plot!(plt, gs, mean(re[2], dims=2), ribbon = std(re[2], dims=2), label=ip*" mean sq")
     plot!(plt, gs, bases[k], label=ip*" basis", linestyle=:dash)
+    display(plt)
 end
 
-display(plt)
-end
+
+
 

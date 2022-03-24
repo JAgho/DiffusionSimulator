@@ -2,10 +2,12 @@
 
 
 #include("../src/gpu_workers.jl")
-#@everywhere include("../src/sequences.jl")
+using DiffusionSimulator
+include("../src/sequences.jl")
 using JLD2
 using CUDA
-using DiffusionSimulator
+
+CUDA.device!(2)
 
  # mutate filenames to get titles
 
@@ -75,36 +77,57 @@ function batch_protocol(prot)
 end
 
 function main()
-    bdir = "../YTRecon/bases/16px_200"
+    bdir = "../YTRecon/bases/16px_2"
+    #fnames = ["16px_ord_basis.jld2"]#readdir(bdir)
     fnames = readdir(bdir)
-    titles = map(x->x[6:end-11], readdir(bdir))
+
+    titles = map(x->x[6:end-11], fnames)
     Is = load_maps(bdir, fnames, titles)
 
-    N = 100e6
+    Ni = 100e6
     Ims = []
     Ns = Int64[]
     lens = []
-    for (key, value) in Is
-        prot = batch_sim(value, N)
+    res = Dict{String, AbstractArray{Float64}}()
+    for (key, I) in Is
+        It = .!I
+        dx = (2/3)*1e-6
+        gam=2.675e8
+        phi = sum(It)/length(It)
+        N = round(Int64, Ni/phi)
+        # build seq object
+    
+        simu = Simu([1e-9], N, dx, gam)# build sim object
+        δ = 5e-3
+        Δ = 10e-3
+        tₘ = 5.1e-3
+        #dir = [1/sqrt(2),1/sqrt(2)]
+        dir = [1.0,0.0]
+        Gₛ = collect(0:0.001:0.793)
+        seq = dde(δ, Δ, tₘ, 1000, Gₛ, dir)
+        #seq = pgse(10e-3, 10.1e-3, 0:0.001:0.793, [0,1], 1000)
+        res[key] = diff_sim_gpu(It, seq, simu)
+        #prot = batch_sim(value, N)
         
-        append!(Ims, prot[1])
-        append!(Ns, prot[2])
-        push!(lens, length(prot[1]))
+        #append!(Ims, prot[1])
+        #append!(Ns, prot[2])
+        #push!(lens, length(prot[1]))
     end
-    res = batch_protocol((Ims, Ns))
+    # res = batch_protocol((Ims, Ns))
 
-    true_res = Dict()
-    o = 1
-    for (i, k) in zip(lens, keys(Is))
-        true_res[k] = res[o:o+i-1]
-        o+=i
-    end
-    return true_res
+    # true_res = Dict()
+    # o = 1
+    # for (i, k) in zip(lens, keys(Is))
+    #     true_res[k] = res[o:o+i-1]
+    #     o+=i
+    # end
+    #return true_res
+    return res
     #return Ims, Ns, Is
 
 end
 
 
 res = main()
-JLD2.save("output/bases/basis_200_1e8_1.jld2", res)
+JLD2.save("output/bases/basis_500_dde_final.jld2", res)
 
