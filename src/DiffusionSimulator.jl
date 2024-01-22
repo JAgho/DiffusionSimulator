@@ -1,7 +1,7 @@
 module DiffusionSimulator
-using StatsBase, CUDA, Adapt#, Plots
+using StatsBase, CUDA#, Plots
 #import Gtk: save_dialog, Null, GtkFileFilter
-import JLD2: save
+#import JLD2: save
 export Seq, Simu, diff_sim, mask_pos, diff_sim_gpu#, diff_save_interface, safe_save
 # Write your package code here.
 struct Seq
@@ -80,14 +80,6 @@ function diff_sim(I,seq,simu)
 
     end
 
-    # Need to sort out the complex exponentiation part of this
-    #S=zeros(Complex, length(seq.G_s));
-    #for gg=1:length(S)
-    #    S[gg] .= mean(exp.((1im*gam*dt*seq.G_s[gg]).*phase))
-    #end
-
-    #Xn(:,1) = Xn(:,1).*Ie; Xn(:,2) = Xn(:,2).*Ie;
-    #A, ind = mask_pos(X, N_i, r)
     return phase
 
 end
@@ -133,6 +125,110 @@ function diff_sim_gpu(I,seq,simu)
     Yn = similar(X) 
     Ind_nx = CUDA.zeros(Float32, N_p)
     Ind_ny = CUDA.zeros(Float32, N_p)
+    C1 = CUDA.zeros(Bool, N_p)
+    C2 = CUDA.zeros(Bool, N_p)
+    I = cu(I)
+    println("simulation variables loaded!")
+    ## Begin main loop
+    for tt in 1:length(t)
+        ## Generate random moves
+        CUDA.rand!(pre_ang)
+        pre_ang .*= (2*pi)
+        pol2cart!(pre_ang, pre_dx, Xn, Yn)
+        ## Apply trial steps to coords
+        X1 .= X; Y1 .= Y
+        X1 .+= Xn; Y1 .+= Yn
+        ## Compute the cell that trial steps end within
+        cmod(X2, X1, u); cmod(Y2, Y1, u)
+        ind_p, A, B = mask_pos_a((X2, Y2), N_i, r, ind_p, A[1], A[2], B[1], B[2])
+        A[1] .= I[ind_s] # this is also where we should populate pre_dx?
+        A[2] .= I[ind_p]
+        ## Recognise illegal steps and delete these moves
+        ## TODO write kernel to allow true comparison of cell moves
+        ## This should allow probablistic acceptance on basis of permeability
+        Ie .= (A[1] .== A[2])
+        Xn .*= Ie;  Yn .*= Ie
+        ## Finalise moves    
+        X .+= Xn;   Y .+= Yn
+        ## Compute phase change based on position
+        X2 .= X .* G[tt,1]; Y2 .= Y .* G[tt,2]
+        phase .+= X2; phase.+= Y2
+        ## Apply periodic boundary conditions     
+        crem(X1, X, u); crem(Y1, Y, u)
+        cmod(X2, X1, u); cmod(Y2, Y1, u)
+        A[1] .= sign.(X1); A[2] .= sign.(Y1)
+        C1 .= X2 .!= X; C2 .= Y2 .!= Y 
+        ## Modify phase change to account for PBC
+        ax = sum(G[1:tt,1]) * u; ay = sum(G[1:tt,2]) * u 
+        #Ind_nx .= A[1] .* C1 .* Ie; Ind_ny .= A[2] .* C2 .* Ie
+        Ind_nx .= A[1] .* C1; Ind_ny .= A[2] .* C2
+        Ind_nx .*= ax; Ind_ny .*= ay 
+        phase .-= Ind_nx 
+        phase .-= Ind_ny 
+        ## Save this time-step's move
+        X .= X2; Y .= Y2      
+        # if mod(tt, 100) == 0
+        #     println("timestep = $tt")
+        #     #display(Plots.scatter(X[1:100], Y[1:100], xlims=[0,r*N_i[1]], ylims=[0,r*N_i[2]], ratio=:equal))
+        # end
+    end
+    S = zeros(Float64, length(seq.G_s))
+    
+    for i in 1:length(S)
+        S[i] = mean(cos.(Float64.(phase) .* simu.γ .* dt .* seq.G_s[i]))
+    end
+    return Array(S)
+end
+
+function diff_sim_gpu_3d(I,seq,simu)
+    println("loading simulation...")
+    ## Unpack variables and copy to device
+    t=seq.t;
+    G = CUDA.zeros(Float32, size(seq.G))
+    G = seq.G
+    D=simu.D
+    N=simu.N;
+    r=cu(Float32(simu.r))
+    dt=t[2]-t[1]
+    N_i = size(I)
+    dim=length(N_i)
+    dx=Float32.(sqrt.(2*dim*dt.*D)) #correct for 3d
+    y = (r .* N_i)
+    u = N_i[1]*r
+    ## Compute intial positions on the host
+    X_cpu=rand(Float32, N, dim) .* [y[1] y[2]] #correct for 3d
+    ind, A = mask_pos!(X_cpu, N_i, r) #correct for 3d (extensive)
+    kill = I[ind] .!= 0 # indices of points in diffusing regions only
+    Xc = X_cpu[kill, 1]
+    Yc = X_cpu[kill, 2]
+    #Zc = X_cpu[kill, 3] 
+    N_p = length(Xc)
+    println(N_p, " active particles")
+    ## Allocate device memory
+    X = CUDA.zeros(Float32, length(Xc))
+    Y = CUDA.zeros(Float32, length(Yc))
+    #Z = CUDA.zeros(Float32, length(Zc))
+    copyto!(X, Xc); copyto!(Y, Yc) #; copyto!(Z, Zc) # copy host coords to device
+    ind_s, A, B = mask_pos_a((X, Y), N_i, r) #correct for 3d (extensive)
+    pre_dx = CUDA.fill(dx[1], N_p) #this should be compartment dependent
+    pre_ang = CUDA.zeros(Float32, N_p)
+    #θ = CUDA.zeros(Float32, N_p)
+    #ϕ = CUDA.zeros(Float32, N_p)
+    Ie = CUDA.zeros(Bool, N_p)
+    phase = CUDA.zeros(Float32, N_p)
+    ind_p = similar(ind_s)
+    X1 = similar(X) 
+    X2 = similar(X) 
+    Y1 = similar(X)
+    Y2 = similar(X)
+    Z1 = similar(X)
+    Z2 = similar(X)
+    Xn = similar(X) 
+    Yn = similar(X) 
+    Zn = similar(X) 
+    Ind_nx = CUDA.zeros(Float32, N_p)
+    Ind_ny = CUDA.zeros(Float32, N_p)
+    Ind_nz = CUDA.zeros(Float32, N_p)
     C1 = CUDA.zeros(Bool, N_p)
     C2 = CUDA.zeros(Bool, N_p)
     I = cu(I)
